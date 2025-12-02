@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Шпаргалка по игре "Что? Где? Когда?"</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Шпаргалка по игре "Что? Где? Когда?"</h1>
+        <p>Сезон 2025</p>
+        <button class="theme-toggle" id="themeToggle" aria-label="Переключить тему оформления">🌙</button>
+    </header>
+
+    <main>
+        <div class="controls-section">
+            <div class="search-container" role="search">
+                <label for="searchInput" class="visually-hidden">Поиск по вопросам, ответам и темам</label>
+                <input type="text" id="searchInput" placeholder="Поиск по вопросам, ответам и темам..." aria-label="Поиск по вопросам, ответам и темам">
+                <button id="searchButton" aria-label="Выполнить поиск">🔍</button>
+            </div>
+
+            <div class="controls" role="group" aria-label="Настройки отображения">
+                <label for="perPage">Вопросов на странице:</label>
+                <select id="perPage" aria-label="Количество вопросов на странице">
+                    <option value="5">5</option>
+                    <option value="10" selected>10</option>
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                </select>
+            </div>
+
+            <div class="controls" role="group" aria-label="Параметры сортировки">
+                <label for="sortBy">Сортировать по:</label>
+                <select id="sortBy" aria-label="Критерий сортировки">
+                    <option value="date_desc" selected>Дате (новые первые)</option>
+                    <option value="date_asc">Дате (старые первые)</option>
+                    <option value="round_asc">Теме (А-Я)</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="questionsContainer">
+            <!-- Questions will be loaded here -->
+        </div>
+
+        <div class="pagination" role="navigation" aria-label="Навигация по страницам">
+            <button id="prevPage" aria-label="Предыдущая страница">◀ Назад</button>
+            <span id="pageInfo" class="page-info" aria-live="polite"></span>
+            <button id="nextPage" aria-label="Следующая страница">Вперед ▶</button>
+        </div>
+    </main>
+
+    <footer>
+        <p>Данные собраны с неофициального сайта ЧГК</p>
+        <p>Всего вопросов в базе: <span id="totalCount">0</span></p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

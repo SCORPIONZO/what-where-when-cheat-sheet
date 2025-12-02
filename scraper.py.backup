@@ -1,0 +1,1912 @@
+import requests
+from bs4 import BeautifulSoup
+import sqlite3
+import time
+import re
+import os
+from urllib.parse import urljoin, urlparse
+
+# Create database and table
+def init_db():
+    conn = sqlite3.connect('data/questions.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS questions
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  game_date TEXT,
+                  round_title TEXT,
+                  question_text TEXT,
+                  answer_text TEXT,
+                  source_url TEXT,
+                  images TEXT)''')
+    
+    # Create images table
+    c.execute('''CREATE TABLE IF NOT EXISTS question_images
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  question_id INTEGER,
+                  image_url TEXT,
+                  local_path TEXT,
+                  FOREIGN KEY (question_id) REFERENCES questions (id))''')
+    
+    conn.commit()
+    conn.close()
+
+# Main scraping function for 2009 season
+def scrape_season_2009():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2009"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2009/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+def clean_text(text):
+    """Очистка и нормализация текста"""
+    if not text:
+        return ""
+    
+    # Удаление лишних пробелов
+    text = re.sub(r'\s+', ' ', text.strip())
+    
+    # Удаление лишних переносов строк, но сохранение некоторого форматирования
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    
+    return text
+
+def is_relevant_image(img_url, alt_text):
+    """Проверка, является ли изображение релевантным вопросу"""
+    # Список нерелевантных изображений
+    irrelevant_patterns = [
+        r'logo',
+        r'logon\.png',
+        r'cinar\.svg',
+        r'yandex',
+        r'tracking',
+        r'counter',
+        r'statistic'
+    ]
+    
+    # Проверяем URL
+    for pattern in irrelevant_patterns:
+        if re.search(pattern, img_url, re.IGNORECASE):
+            return False
+    
+    # Проверяем alt текст
+    for pattern in irrelevant_patterns:
+        if re.search(pattern, alt_text, re.IGNORECASE):
+            return False
+    
+    return True
+
+def find_images_for_question(soup, question_text, question_element):
+    """Find images that are specifically related to a question with improved accuracy"""
+    images = []
+    
+    # Get all images on the page
+    all_images = soup.find_all('img')
+    
+    # Look for specific attention phrases in question text
+    attention_phrases = [
+        r"внимание.*(?:картинк|фото|иллюстраци|изображен|портрет|картин|рисунк|схем|таблиц)",
+        r"внимание.*:",
+        r"перед вами",
+        r"на рисунке"
+    ]
+    
+    # Check if question contains attention phrases
+    has_attention_phrase = False
+    for phrase in attention_phrases:
+        if re.search(phrase, question_text.lower()):
+            has_attention_phrase = True
+            break
+    
+    # Always try keyword matching approach since positional approach doesn't work well
+    # Extract key terms from question text
+    key_terms = re.findall(r'[а-яА-ЯёЁ]+', question_text.lower())
+    
+    # Filter out common words
+    common_words = {'в', 'на', 'и', 'с', 'по', 'к', 'у', 'о', 'от', 'до', 'за', 'из', 'об', 'под', 'про', 'над', 'что', 'где', 'когда', 'это', 'был', 'была', 'было', 'будет', 'или', 'для', 'же', 'ли', 'бы', 'так', 'как', 'также', 'только', 'еще', 'уже', 'все', 'всё', 'всех', 'всем', 'всей', 'всеми', 'всю', 'весь', 'всей', 'сам', 'сама', 'само', 'сами', 'самых', 'самому', 'самой', 'самого', 'самому', 'самыми', 'самими', 'тот', 'та', 'то', 'те', 'тех', 'тому', 'той', 'тем', 'теми', 'такой', 'такая', 'такое', 'такие', 'таких', 'такому', 'такой', 'такого', 'другой', 'другая', 'другое', 'другие', 'других', 'другому', 'другой', 'другого', 'другим', 'другими', 'иной', 'иная', 'иное', 'иные', 'иных', 'иному', 'иной', 'иного', 'иными', 'один', 'одна', 'одно', 'одни', 'одного', 'одной', 'одному', 'одним', 'одними'}
+    
+    significant_terms = [term for term in key_terms if term not in common_words and len(term) > 4]
+    
+    # Look for images whose alt text contains these significant terms
+    matched_images = []
+    for img in all_images:
+        alt_text = img.get('alt', '').lower()
+        src = img.get('src', '')
+        
+        # Skip if no alt text or src
+        if not alt_text or not src:
+            continue
+            
+        # Check if image is relevant
+        if not is_relevant_image(src, alt_text):
+            continue
+            
+        # If question has attention phrase, we're more liberal in matching
+        if has_attention_phrase:
+            # Check if any significant term appears in the alt text
+            for term in significant_terms[:10]:  # Check first 10 significant terms
+                if term in alt_text:
+                    full_url = urljoin(soup.base_url if soup.base_url else '', src)
+                    matched_images.append(full_url)
+                    break
+        else:
+            # For non-attention questions, be more strict
+            match_count = 0
+            for term in significant_terms[:5]:  # Check first 5 significant terms
+                if term in alt_text:
+                    match_count += 1
+                    # If we find 2 or more matches, consider it relevant
+                    if match_count >= 2:
+                        full_url = urljoin(soup.base_url if soup.base_url else '', src)
+                        matched_images.append(full_url)
+                        break
+    
+    # Limit to 2 most relevant images
+    images = matched_images[:2]
+    
+    return images
+
+# Extract questions and answers from a game page
+def extract_questions_from_page(url):
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        soup.base_url = url  # Store base URL for resolving relative paths
+        
+        # Extract game date from URL
+        game_date = extract_date_from_url(url)
+        
+        # Find all rounds
+        rounds = soup.find_all('h3')
+        questions_data = []
+        
+        for round_index, round_elem in enumerate(rounds):
+            # Получаем заголовок раунда
+            round_title = clean_text(round_elem.get_text()) if round_elem else "Неизвестный раунд"
+            
+            # Ищем вопрос в раунде
+            question_header = round_elem.find_next(string=re.compile(r"ВОПРОС"))
+            if question_header:
+                # Ищем элемент с вопросом
+                question_text = ""
+                question_parent = question_header.parent
+                
+                # Ищем следующий элемент после заголовка вопроса
+                next_elem = question_parent.next_sibling
+                if next_elem and hasattr(next_elem, 'get_text'):
+                    question_text = clean_text(next_elem.get_text())
+                elif next_elem:
+                    question_text = clean_text(str(next_elem))
+                
+                # Если не нашли текст вопроса таким способом, попробуем другой
+                if not question_text:
+                    # Ищем все элементы до начала ответа
+                    current = question_parent.next_sibling
+                    texts = []
+                    while current and not (hasattr(current, 'get_text') and 
+                                          re.search(r"ОТВЕТ", current.get_text())):
+                        if hasattr(current, 'get_text'):
+                            txt = clean_text(current.get_text())
+                            if txt:
+                                texts.append(txt)
+                        elif current:
+                            txt = clean_text(str(current))
+                            if txt:
+                                texts.append(txt)
+                        current = current.next_sibling
+                        # Ограничиваем поиск, чтобы не уйти слишком далеко
+                        if len(texts) > 10:
+                            break
+                    
+                    if texts:
+                        question_text = " ".join(texts)
+                
+                # Ищем изображения, связанные с вопросом
+                images = find_images_for_question(soup, question_text, question_header)
+                
+                # Ищем ответ
+                answer_text = ""
+                answer_header = round_elem.find_next(string=re.compile(r"ОТВЕТ"))
+                if answer_header:
+                    answer_parent = answer_header.parent
+                    next_elem = answer_parent.next_sibling
+                    
+                    if next_elem and hasattr(next_elem, 'get_text'):
+                        answer_text = clean_text(next_elem.get_text())
+                    elif next_elem:
+                        answer_text = clean_text(str(next_elem))
+                
+                # Ищем правильный ответ, если обычный ответ не найден
+                if not answer_text:
+                    correct_answer_elem = round_elem.find_next(string=re.compile(r"Правильный ответ"))
+                    if correct_answer_elem:
+                        # Ищем родительский элемент и следующие за ним элементы
+                        parent = correct_answer_elem.parent
+                        next_siblings = []
+                        sibling = parent.next_sibling
+                        while sibling and len(next_siblings) < 5:
+                            next_siblings.append(sibling)
+                            sibling = sibling.next_sibling
+                        
+                        # Собираем текст из следующих элементов
+                        answer_parts = []
+                        for sib in next_siblings:
+                            if hasattr(sib, 'get_text'):
+                                txt = clean_text(sib.get_text())
+                                if txt and not re.search(r"(ВОПРОС|ОТВЕТ|Раунд)", txt):
+                                    answer_parts.append(txt)
+                            elif sib and not re.search(r"(ВОПРОС|ОТВЕТ|Раунд)", str(sib)):
+                                txt = clean_text(str(sib))
+                                if txt:
+                                    answer_parts.append(txt)
+                        
+                        if answer_parts:
+                            answer_text = " ".join(answer_parts)
+                
+                # Если текст вопроса найден, добавляем его в список
+                if question_text and len(question_text) > 10:  # Минимальная длина для реального вопроса
+                    questions_data.append({
+                        'game_date': game_date,
+                        'round_title': round_title,
+                        'question_text': question_text,
+                        'answer_text': answer_text if answer_text else "Ответ не найден",
+                        'source_url': url,
+                        'images': images
+                    })
+                    
+        return questions_data
+    
+    except Exception as e:
+        print(f"Error processing {url}: {str(e)}")
+        return []
+
+def extract_date_from_url(url):
+    # Extract date from URL pattern like /30032025-pervaya-igra-vesenney-serii
+    match = re.search(r'/(\d{8})-', url)
+    if match:
+        date_str = match.group(1)
+        # Convert DDMMYYYY to DD.MM.YYYY
+        return f"{date_str[0:2]}.{date_str[2:4]}.{date_str[4:8]}"
+    return "Unknown"
+
+# Save questions to database
+def save_questions(questions_data):
+    conn = sqlite3.connect('data/questions.db')
+    c = conn.cursor()
+    
+    for q in questions_data:
+        # Check if question already exists
+        c.execute('''SELECT COUNT(*) FROM questions WHERE question_text = ?''', (q['question_text'],))
+        count = c.fetchone()[0]
+        
+        # If question doesn't exist, insert it
+        if count == 0:
+            # Convert images list to string for storage
+            images_str = ','.join(q['images']) if q['images'] else ''
+            
+            c.execute('''INSERT INTO questions 
+                         (game_date, round_title, question_text, answer_text, source_url, images)
+                         VALUES (?, ?, ?, ?, ?, ?)''',
+                      (q['game_date'], q['round_title'], q['question_text'], 
+                       q['answer_text'], q['source_url'], images_str))
+            
+            # Get the inserted question ID
+            question_id = c.lastrowid
+            
+            # Save images to separate table
+            for img_url in q['images']:
+                c.execute('''INSERT INTO question_images 
+                             (question_id, image_url, local_path)
+                             VALUES (?, ?, ?)''',
+                          (question_id, img_url, ''))
+    
+    conn.commit()
+    conn.close()
+
+# Main scraping function for 2024 season
+def scrape_season_2024():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2020-yh/sezon-2024"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2020-yh/sezon-2024/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2023 season
+def scrape_season_2023():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2020-yh/sezon-2023"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2020-yh/sezon-2023/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2022 season
+def scrape_season_2022():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2020-yh/sezon-2022"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2020-yh/sezon-2022/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2021 season
+def scrape_season_2021():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2020-yh/sezon-2021"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2020-yh/sezon-2021/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2020 season
+def scrape_season_2020():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2020-yh/sezon-2020"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2020-yh/sezon-2020/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2019 season
+def scrape_season_2019():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2019"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2019/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2015 season
+def scrape_season_2015():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2015"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2015/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2009 season
+def scrape_season_2009():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2009"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2009/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+if __name__ == "__main__":
+    scrape_season_1996()
+    print("Сбор данных завершен!")
+
+# Main scraping function for 2013 season
+def scrape_season_2013():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2013"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2013/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2007 season
+def scrape_season_2007():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2007"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2007/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2001 season
+def scrape_season_2001():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2001"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2001/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 1995 season
+def scrape_season_1995():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-1990-yh/sezon-1995"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-1990-yh/sezon-1995/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2017 season
+def scrape_season_2017():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2017"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2017/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2011 season
+def scrape_season_2011():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2011"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2011/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2005 season
+def scrape_season_2005():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2005"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2005/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 1999 season
+def scrape_season_1999():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-1990-yh/sezon-1999"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-1990-yh/sezon-1999/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2008 season
+def scrape_season_2008():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2008"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2008/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2002 season
+def scrape_season_2002():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2002"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2002/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 1996 season
+def scrape_season_1996():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-1990-yh/sezon-1996"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-1990-yh/sezon-1996/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+if __name__ == "__main__":
+    scrape_season_1996()
+    print("Сбор данных завершен!")
+
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2002/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+if __name__ == "__main__":
+    scrape_season_2002()
+    print("Сбор данных завершен!")
+
+# Main scraping function for 1993 season
+def scrape_season_1993():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-1990-yh/sezon-1993"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-1990-yh/sezon-1993/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2016 season
+def scrape_season_2016():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2016"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2016/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2010 season
+def scrape_season_2010():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2010"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2010/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2004 season
+def scrape_season_2004():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2004"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2004/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2020 season
+def scrape_season_2020():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2020-yh/sezon-2020"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2020-yh/sezon-2020/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2014 season
+def scrape_season_2014():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2010-yh/sezon-2014"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2014/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2008 season
+def scrape_season_2008():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2008"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2008/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+if __name__ == "__main__":
+    scrape_season_2008()
+    print("Сбор данных завершен!")
+
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2010-yh/sezon-2014/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+if __name__ == "__main__":
+    scrape_season_2014()
+    print("Сбор данных завершен!")
+
+def scrape_season_2004():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2004"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2004/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 1998 season
+def scrape_season_1998():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-1990-yh/sezon-1998"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-1990-yh/sezon-1998/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 1992 season
+def scrape_season_1992():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-1990-yh/sezon-1992"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-1990-yh/sezon-1992/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# Main scraping function for 2021 season
+def scrape_season_2021():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2020-yh/sezon-2021"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2020-yh/sezon-2021/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+# If you need to run other scrapers, you can call them here
+# For now, we'll just run the 2009 season scraper
+if __name__ == "__main__":
+    scrape_season_2009()
+    print("Сбор данных завершен!")
+
+# Main scraping function for 2003 season
+def scrape_season_2003():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-2000-yh/sezon-2003"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-2000-yh/sezon-2003/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+if __name__ == "__main__":
+    scrape_season_2003()
+    print("Сбор данных завершен!")
+
+# Main scraping function for 1997 season
+def scrape_season_1997():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-1990-yh/sezon-1997"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-1990-yh/sezon-1997/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+if __name__ == "__main__":
+    scrape_season_1996()
+    print("Сбор данных завершен!")
+
+# Main scraping function for 1991 season
+def scrape_season_1991():
+    base_url = "https://xn----etbqgrg5bs.xn--p1ai"
+    season_url = "https://xn----etbqgrg5bs.xn--p1ai/igry-1990-yh/sezon-1991"
+    
+    # Initialize database
+    init_db()
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(season_url, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all game links
+        game_links = soup.find_all('a', href=re.compile(r'/igry-1990-yh/sezon-1991/'))
+        
+        urls_to_scrape = []
+        for link in game_links:
+            href = link.get('href')
+            # Проверяем, что это ссылка на конкретную игру (содержит дату в формате DDMMYYYY)
+            if href and re.search(r'/\d{8}-', href):
+                full_url = urljoin(base_url, href)
+                urls_to_scrape.append(full_url)
+        
+        # Remove duplicates
+        urls_to_scrape = list(set(urls_to_scrape))
+        
+        print(f"Найдено {len(urls_to_scrape)} игр для сбора данных")
+        
+        # Scrape each game
+        for i, url in enumerate(urls_to_scrape):
+            print(f"Обработка игры {i+1}/{len(urls_to_scrape)}: {url}")
+            questions = extract_questions_from_page(url)
+            save_questions(questions)
+            print(f"Сохранено {len(questions)} вопросов из этой игры")
+            # Be respectful to the server
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных: {str(e)}")
+
+if __name__ == "__main__":
+    scrape_season_1991()
+    print("Сбор данных завершен!")
