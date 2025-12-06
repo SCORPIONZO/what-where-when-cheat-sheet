@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель - Шпаргалка по игре "Что? Где? Когда?"</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: hsl(var(--background));
+            color: hsl(var(--foreground));
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+        
+        header {
+            background-color: hsl(var(--card));
+            color: hsl(var(--card-foreground));
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid hsl(var(--border));
+        }
+        
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1rem 1.5rem;
+        }
+        
+        .header-content h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            background-color: hsl(var(--primary));
+            color: hsl(var(--primary-foreground));
+            text-decoration: none;
+            border-radius: var(--radius);
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        
+        .back-link:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        
+        .card {
+            background-color: hsl(var(--card));
+            border-radius: var(--radius);
+            border: 1px solid hsl(var(--border));
+            margin-bottom: 1.5rem;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card-title {
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: hsl(var(--foreground));
+        }
+        
+        .year-checkbox-item {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid hsl(var(--border));
+        }
+        
+        .year-checkbox-item:last-child {
+            border-bottom: none;
+        }
+        
+        .year-checkbox-item input[type="checkbox"] {
+            margin-right: 0.75rem;
+            width: 1.25rem;
+            height: 1.25rem;
+            accent-color: hsl(var(--primary));
+            border-radius: 4px;
+        }
+        
+        .year-checkbox-item label {
+            font-size: 1rem;
+            cursor: pointer;
+            flex-grow: 1;
+            color: hsl(var(--foreground));
+        }
+        
+        .save-button {
+            background-color: hsl(var(--primary));
+            color: hsl(var(--primary-foreground));
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            width: 100%;
+            max-width: 300px;
+            margin: 1.5rem auto;
+            display: block;
+        }
+        
+        .save-button:hover:not(:disabled) {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+        
+        .save-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .notification {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: var(--radius);
+            display: none;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .notification.success {
+            background-color: hsl(142, 76%, 36%);
+            color: hsl(0, 0%, 100%);
+        }
+        
+        .notification.error {
+            background-color: hsl(0, 84%, 60%);
+            color: hsl(0, 0%, 100%);
+        }
+        
+        .select-all-container {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .select-all-container button {
+            background-color: hsl(var(--secondary));
+            color: hsl(var(--secondary-foreground));
+            border: 1px solid hsl(var(--border));
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        
+        .select-all-container button:hover {
+            background-color: hsl(var(--accent));
+        }
+        
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .select-all-container {
+                flex-direction: column;
+            }
+            
+            .select-all-container button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>Админ-панель</h1>
+            <a href="/" class="back-link">← Вернуться к основному приложению</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h2 class="card-title">Управление видимостью лет</h2>
+            <div class="notification" id="notification"></div>
+            
+            <div class="select-all-container">
+                <button id="selectAll">Выбрать все</button>
+                <button id="deselectAll">Снять выделение</button>
+            </div>
+            
+            <div id="visibility-controls">
+                <p>Загрузка данных...</p>
+            </div>
+            
+            <button id="saveButton" class="save-button" disabled>Сохранить изменения</button>
+        </div>
+    </div>
+
+    <script>
+        // Храним состояние видимости годов
+        let visibleYears = [];
+        let allYearsData = {};
+
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchStats();
+            fetchVisibleYears();
+            
+            // Добавляем обработчики для кнопок выбора/снятия выбора всех элементов
+            document.getElementById('selectAll').addEventListener('click', selectAll);
+            document.getElementById('deselectAll').addEventListener('click', deselectAll);
+        });
+
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/admin/questions-by-year');
+                const data = await response.json();
+                
+                allYearsData = data.questions_by_year;
+                displayVisibilityControls();
+            } catch (error) {
+                console.error('Ошибка загрузки статистики:', error);
+                document.getElementById('visibility-controls').innerHTML = '<p>Ошибка загрузки данных</p>';
+            }
+        }
+
+        async function fetchVisibleYears() {
+            try {
+                const response = await fetch('/api/admin/visible-years');
+                const data = await response.json();
+                
+                visibleYears = data.visible_years;
+                displayVisibilityControls();
+            } catch (error) {
+                console.error('Ошибка загрузки настроек видимости:', error);
+                document.getElementById('visibility-controls').innerHTML = '<p>Ошибка загрузки настроек видимости</p>';
+            }
+        }
+
+        function displayVisibilityControls() {
+            const container = document.getElementById('visibility-controls');
+            
+            if (Object.keys(allYearsData).length === 0) {
+                return;
+            }
+            
+            let html = '';
+            
+            // Сортируем года по убыванию
+            const sortedYears = Object.keys(allYearsData).sort((a, b) => b - a);
+            
+            sortedYears.forEach(year => {
+                const isChecked = visibleYears.includes(year) ? 'checked' : '';
+                const count = allYearsData[year];
+                html += `
+                    <div class="year-checkbox-item">
+                        <input type="checkbox" id="year-${year}" value="${year}" ${isChecked}>
+                        <label for="year-${year}">${year} (${count} вопросов)</label>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+            
+            // Добавляем обработчики событий
+            document.querySelectorAll('.year-checkbox-item input[type="checkbox"]').forEach(checkbox => {
+                checkbox.addEventListener('change', function() {
+                    document.getElementById('saveButton').disabled = false;
+                });
+            });
+        }
+
+        function selectAll() {
+            document.querySelectorAll('.year-checkbox-item input[type="checkbox"]').forEach(checkbox => {
+                checkbox.checked = true;
+            });
+            document.getElementById('saveButton').disabled = false;
+        }
+
+        function deselectAll() {
+            document.querySelectorAll('.year-checkbox-item input[type="checkbox"]').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            document.getElementById('saveButton').disabled = false;
+        }
+
+        document.getElementById('saveButton').addEventListener('click', async function() {
+            // Получаем выбранные года
+            const checkboxes = document.querySelectorAll('.year-checkbox-item input[type="checkbox"]:checked');
+            const selectedYears = Array.from(checkboxes).map(cb => cb.value);
+            
+            try {
+                const response = await fetch('/api/admin/visible-years', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        visible_years: selectedYears
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    showNotification('Настройки успешно сохранены!', 'success');
+                    document.getElementById('saveButton').disabled = true;
+                    
+                    // Обновляем локальное состояние
+                    visibleYears = selectedYears;
+                } else {
+                    showNotification('Ошибка при сохранении настроек', 'error');
+                }
+            } catch (error) {
+                console.error('Ошибка при сохранении настроек:', error);
+                showNotification('Ошибка при сохранении настроек: ' + error.message, 'error');
+            }
+        });
+
+        function showNotification(message, type) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = 'notification ' + type;
+            notification.style.display = 'block';
+            
+            // Автоматически скрыть уведомление через 3 секунды
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
