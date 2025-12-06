@@ -85,37 +85,38 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         // Add sorting parameter
-        let orderBy = 'game_date DESC, id ASC';
+        let sortColumn = 'game_date';
+        let sortOrder = 'desc';
+        
         switch(currentSort) {
             case 'date_asc':
-                orderBy = 'game_date ASC, id ASC';
+                sortColumn = 'game_date';
+                sortOrder = 'asc';
+                break;
+            case 'date_desc':
+                sortColumn = 'game_date';
+                sortOrder = 'desc';
+                break;
+            case 'year_asc':
+                sortColumn = 'year';
+                sortOrder = 'asc';
+                break;
+            case 'year_desc':
+                sortColumn = 'year';
+                sortOrder = 'desc';
                 break;
             case 'round_asc':
-                orderBy = 'round_title ASC, game_date DESC';
+                sortColumn = 'round_title';
+                sortOrder = 'asc';
                 break;
-            default: // date_desc
-                orderBy = 'game_date DESC, id ASC';
         }
 
-        // Note: We'll handle sorting on frontend side by modifying the API if needed
+        params.append('sort_by', sortColumn);
+        params.append('sort_order', sortOrder);
 
         fetch(`/api/questions?${params.toString()}`)
             .then(response => response.json())
             .then(data => {
-                // Apply sorting on client-side if needed
-                if (currentSort !== 'date_desc') {
-                    data.questions.sort((a, b) => {
-                        switch(currentSort) {
-                            case 'date_asc':
-                                return new Date(a.game_date) - new Date(b.game_date);
-                            case 'round_asc':
-                                return (a.round_title || '').localeCompare(b.round_title || '');
-                            default:
-                                return new Date(b.game_date) - new Date(a.game_date);
-                        }
-                    });
-                }
-                
                 renderQuestions(data.questions);
                 updatePagination(data);
                 totalCount.textContent = data.total;

@@ -12,6 +12,10 @@ else
     source venv/bin/activate
 fi
 
+# Обновление зависимостей
+echo "Установка/обновление зависимостей..."
+pip install -r requirements.txt
+
 # Запуск скрапера для получения данных
 echo "Сбор вопросов с сайта..."
 python scraper.py
