@@ -10,9 +10,69 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+def extract_correct_answer(answer_text):
+    """Extract only the correct answer part from the answer text"""
+    if not answer_text:
+        return 'Ответ недоступен'
+    
+    # Convert to lowercase for case-insensitive matching
+    lower_text = answer_text.lower()
+    
+    # Possible variations of "correct answer" phrases
+    answer_patterns = [
+        'дан правильный ответ',
+        'дал правильный ответ',
+        'дан правельный ответ',
+        'дал правельный ответ',
+        'правильный ответ',
+        'правельный ответ'
+    ]
+    
+    # Find the first occurrence of any correct answer phrase
+    earliest_index = -1
+    matched_phrase = ''
+    
+    for pattern in answer_patterns:
+        index = lower_text.find(pattern)
+        if index != -1 and (earliest_index == -1 or index < earliest_index):
+            earliest_index = index
+            matched_phrase = pattern
+    
+    # If we found a correct answer phrase, extract everything from that point
+    if earliest_index != -1:
+        # Get the original case version of the phrase
+        original_case_phrase = answer_text[earliest_index:earliest_index + len(matched_phrase)]
+        rest_of_text = answer_text[earliest_index + len(matched_phrase):]
+        return original_case_phrase + rest_of_text
+    
+    # If no pattern found, return the original text
+    return answer_text
+
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/api/years')
+def get_years():
+    conn = get_db_connection()
+    
+    # Get distinct years from game_date column (format DD.MM.YYYY)
+    query = '''
+        SELECT DISTINCT substr(game_date, 7, 4) as year 
+        FROM questions 
+        WHERE game_date IS NOT NULL 
+        AND game_date != '' 
+        ORDER BY year DESC
+    '''
+    years_result = conn.execute(query).fetchall()
+    conn.close()
+    
+    # Extract years from result
+    years = [str(year['year']) for year in years_result]
+    
+    return jsonify({
+        'years': years
+    })
 
 @app.route('/api/questions')
 def get_questions():
@@ -25,23 +85,36 @@ def get_questions():
     # Get search parameter
     search = request.args.get('search', '', type=str)
     
-    # Get sort parameters
-    sort_by = request.args.get('sort_by', 'game_date')
+    # Get year filter
+    year_filter = request.args.get('year', 'all', type=str)
+    
+    # Get sort parameters (default to year desc)
+    sort_by = request.args.get('sort_by', 'year')
     sort_order = request.args.get('sort_order', 'desc')
     
     # Validate sort parameters
     allowed_sort_columns = ['game_date', 'id', 'round_title', 'year']
     if sort_by not in allowed_sort_columns:
-        return jsonify({'error': 'Invalid sort column'}), 400
+        sort_by = 'year'
         
     allowed_sort_orders = ['asc', 'desc']
     if sort_order not in allowed_sort_orders:
-        return jsonify({'error': 'Invalid sort order'}), 400
+        sort_order = 'desc'
     
     # Build base query for filtering out questions without answers
     base_conditions = '''answer_text IS NOT NULL 
                          AND trim(answer_text) != '' 
-                         AND answer_text NOT LIKE '%не найден%' '''
+                         AND answer_text NOT LIKE '%не найден%' 
+                         AND (LOWER(answer_text) LIKE '%дан правильный ответ%' 
+                              OR LOWER(answer_text) LIKE '%дал правильный ответ%'
+                              OR LOWER(answer_text) LIKE '%дан правельный ответ%'
+                              OR LOWER(answer_text) LIKE '%дал правельный ответ%'
+                              OR LOWER(answer_text) LIKE '%правильный ответ%'
+                              OR LOWER(answer_text) LIKE '%правельный ответ%')'''
+    
+    # Add year condition if specified (year extracted from DD.MM.YYYY format)
+    if year_filter != 'all':
+        base_conditions += f" AND substr(game_date, 7, 4) = '{year_filter}'"
     
     if search:
         # First, get all questions that meet our criteria for fuzzy search
@@ -82,14 +155,17 @@ def get_questions():
                 question_tuple['images'] = question_tuple['images'].split(',')
             else:
                 question_tuple['images'] = []
+                
+            # Extract only the correct answer part
+            question_tuple['answer_text'] = extract_correct_answer(question_tuple['answer_text'])
             questions_list.append(question_tuple)
         
         total = len(search_results)
     else:
         # Regular query without search
-        # Handle year sorting specially
+        # Handle year sorting specially (year extracted from DD.MM.YYYY format)
         if sort_by == 'year':
-            order_clause = f"substr(game_date, 1, 4) {sort_order.upper()}, game_date DESC, id ASC"
+            order_clause = f"substr(game_date, 7, 4) {sort_order.upper()}, game_date DESC, id ASC"
         else:
             order_clause = f"{sort_by} {sort_order.upper()}, id ASC"
             
@@ -115,6 +191,9 @@ def get_questions():
                 q_dict['images'] = q_dict['images'].split(',')
             else:
                 q_dict['images'] = []
+                
+            # Extract only the correct answer part
+            q_dict['answer_text'] = extract_correct_answer(q_dict['answer_text'])
             questions_list.append(q_dict)
     
     conn.close()

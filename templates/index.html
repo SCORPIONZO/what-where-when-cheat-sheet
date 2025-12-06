@@ -8,19 +8,22 @@
 </head>
 <body>
     <header>
-        <h1>"Что? Где? Когда?"</h1>
-        <p>Отличники вперед!!!</p>
-        <button class="theme-toggle" id="themeToggle" aria-label="Переключить тему оформления">🌙</button>
-    </header>
-
-    <main>
-        <div class="controls-section">
+        <div class="header-content">
+            <div class="header-title">
+                <h1>"Что? Где? Когда?"</h1>
+                <p>Отличники вперед!!!</p>
+            </div>
             <div class="search-container" role="search">
                 <label for="searchInput" class="visually-hidden">Поиск по вопросам, ответам и темам</label>
                 <input type="text" id="searchInput" placeholder="Поиск " aria-label="Поиск..">
                 <button id="searchButton" aria-label="Выполнить поиск">🔍</button>
             </div>
+            <button class="theme-toggle" id="themeToggle" aria-label="Переключить тему оформления">🌙</button>
+        </div>
+    </header>
 
+    <main>
+        <div class="controls-section">
             <div class="controls" role="group" aria-label="Настройки отображения">
                 <label for="perPage">Вопросов на странице:</label>
                 <select id="perPage" aria-label="Количество вопросов на странице">
@@ -31,14 +34,18 @@
                 </select>
             </div>
 
-            <div class="controls" role="group" aria-label="Параметры сортировки">
-                <label for="sortBy">Сортировать по:</label>
-                <select id="sortBy" aria-label="Критерий сортировки">
-                    <option value="date_desc" selected>Дате (новые первые)</option>
-                    <option value="date_asc">Дате (старые первые)</option>
-                    <option value="year_desc">Году (новые первые)</option>
-                    <option value="year_asc">Году (старые первые)</option>
-                    <option value="round_asc">Теме (А-Я)</option>
+            <div class="controls" role="group" aria-label="Фильтр по году">
+                <label for="filterYear">Год:</label>
+                <select id="filterYear" aria-label="Фильтр по году">
+                    <option value="all" selected>Все годы</option>
+                </select>
+            </div>
+
+            <div class="controls" role="group" aria-label="Режим отображения">
+                <label for="viewMode">Режим просмотра:</label>
+                <select id="viewMode" aria-label="Режим отображения">
+                    <option value="grid" selected>Сетка</option>
+                    <option value="card">Карточка</option>
                 </select>
             </div>
         </div>
@@ -49,7 +56,17 @@
 
         <div class="pagination" role="navigation" aria-label="Навигация по страницам">
             <button id="prevPage" aria-label="Предыдущая страница">◀ Назад</button>
+            
+            <div class="page-input-container">
+                <label for="pageNumberInput" class="page-number-label">Страница:</label>
+                <input type="number" id="pageNumberInput" class="page-number-input" min="1" value="1">
+                <span class="page-number-slash">/</span>
+                <span id="totalPages" class="total-pages">1</span>
+                <button id="goToPage" class="go-to-page-btn" aria-label="Перейти к указанной странице">Перейти</button>
+            </div>
+            
             <span id="pageInfo" class="page-info" aria-live="polite"></span>
+            
             <button id="nextPage" aria-label="Следующая страница">Вперед ▶</button>
         </div>
     </main>

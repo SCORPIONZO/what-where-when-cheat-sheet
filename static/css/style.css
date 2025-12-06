@@ -72,25 +72,36 @@ body.dark-theme {
 header {
     background-color: hsl(var(--card));
     color: hsl(var(--card-foreground));
-    text-align: center;
-    padding: 2rem;
+    padding: 1rem 2rem;
     margin-bottom: 2rem;
     border-radius: var(--radius);
     border: 1px solid hsl(var(--border));
     box-shadow: 0 1px 3px 0 hsl(var(--border) / 0.1);
+    position: relative;
+}
+
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.header-title {
+    flex: 1;
+    min-width: 200px;
 }
 
 header h1 {
-    margin-bottom: 0.5rem;
-    font-size: 2.25rem;
+    margin-bottom: 0.25rem;
+    font-size: 1.75rem;
     font-weight: 800;
     line-height: 1.25;
 }
 
 .theme-toggle {
-    position: absolute;
-    top: 1.5rem;
-    right: 1.5rem;
+    position: static;
     background-color: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
     border: none;
@@ -102,6 +113,76 @@ header h1 {
     align-items: center;
     justify-content: center;
     font-size: 1.25rem;
+    transition: all 0.3s ease;
+}
+
+.search-container {
+    display: flex;
+    flex: 1;
+    min-width: 150px;
+    max-width: 300px;
+    width: 100%;
+    height: fit-content;
+}
+
+#searchInput {
+    flex: 1;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid hsl(var(--input));
+    border-radius: var(--radius) 0 0 var(--radius);
+    font-size: 0.8125rem;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    min-height: 20px;
+}
+
+#searchButton {
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    border: none;
+    padding: 0.125rem 0.75rem;
+    cursor: pointer;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-weight: 500;
+    font-size: 0.8125rem;
+    min-height: 20px;
+}
+
+@media (max-width: 768px) {
+    .search-container {
+        max-width: 100%;
+        order: 3;
+    }
+    
+    .header-title {
+        text-align: center;
+    }
+    
+    header {
+        padding: 1rem;
+    }
+    
+    header h1 {
+        font-size: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .header-content {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .search-container {
+        width: 100%;
+        min-width: 100%;
+        max-width: 100%;
+    }
+    
+    #searchInput,
+    #searchButton {
+        min-height: 20px;
+    }
 }
 
 main {
@@ -119,33 +200,6 @@ main {
     padding: 1.5rem;
     border-radius: var(--radius);
     border: 1px solid hsl(var(--border));
-}
-
-.search-container {
-    display: flex;
-    flex: 1;
-    min-width: 300px;
-}
-
-#searchInput {
-    flex: 1;
-    padding: 0.75rem 1rem;
-    border: 1px solid hsl(var(--input));
-    border-radius: var(--radius) 0 0 var(--radius);
-    font-size: 1rem;
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
-}
-
-#searchButton {
-    background-color: hsl(var(--primary));
-    color: hsl(var(--primary-foreground));
-    border: none;
-    padding: 0.75rem 1.5rem;
-    cursor: pointer;
-    border-radius: 0 var(--radius) var(--radius) 0;
-    font-weight: 500;
-    font-size: 1rem;
 }
 
 .controls {
@@ -338,6 +392,33 @@ footer {
 }
 
 /* Адаптивный дизайн */
+@media (max-width: 1024px) {
+    body {
+        padding: 15px;
+    }
+    
+    header {
+        padding: 1.5rem;
+    }
+    
+    header h1 {
+        font-size: 2rem;
+    }
+    
+    .controls-section {
+        padding: 1.25rem;
+    }
+    
+    .search-container {
+        width: 300px;
+        max-width: 300px;
+    }
+    
+    .question-card {
+        padding: 1.25rem;
+    }
+}
+
 @media (max-width: 768px) {
     body {
         padding: 10px;
@@ -356,7 +437,9 @@ footer {
     }
     
     .search-container {
-        min-width: 100%;
+        width: 300px;
+        min-width: 300px;
+        max-width: 300px;
     }
     
     .question-header {
@@ -384,5 +467,325 @@ footer {
     #pageInfo {
         font-size: 0.875rem;
         margin: 0 0.5rem;
+    }
+    
+    footer {
+        padding: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    body {
+        padding: 5px;
+    }
+    
+    header {
+        padding: 1rem;
+    }
+    
+    header h1 {
+        font-size: 1.25rem;
+    }
+    
+    header p {
+        font-size: 0.875rem;
+    }
+    
+    .theme-toggle {
+        top: 1rem;
+        right: 1rem;
+        width: 35px;
+        height: 35px;
+        font-size: 1rem;
+    }
+    
+    .controls-section {
+        padding: 1rem;
+    }
+    
+    .search-container {
+        width: 100%;
+        min-width: 100%;
+        max-width: 100%;
+        flex-direction: column;
+    }
+    
+    #searchInput {
+        min-height: 20px;
+        padding: 0.125rem 0.5rem;
+        font-size: 0.8125rem;
+    }
+    
+    #searchButton {
+        min-height: 20px;
+        padding: 0.125rem 0.75rem;
+        font-size: 0.8125rem;
+    }
+    
+    .controls {
+        width: 100%;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .controls label {
+        margin-bottom: 0.25rem;
+    }
+    
+    #perPage, #sortBy {
+        width: 100%;
+    }
+    
+    .question-card {
+        padding: 1rem;
+    }
+    
+    .question-text, .answer-text {
+        padding: 0.5rem;
+        font-size: 0.875rem;
+    }
+    
+    .pagination {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    
+    .pagination button {
+        width: 100%;
+        padding: 0.75rem;
+    }
+    
+    .page-input-container {
+        order: 3;
+        width: 100%;
+        justify-content: center;
+        margin-top: 0.5rem;
+    }
+    
+    #pageInfo {
+        margin: 0;
+    }
+    
+    footer {
+        padding: 1rem;
+        font-size: 0.75rem;
+    }
+}
+
+.page-input-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.page-number-input {
+    width: 60px;
+    padding: 0.25rem;
+    border: 1px solid hsl(var(--input));
+    border-radius: var(--radius);
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-size: 0.875rem;
+    text-align: center;
+}
+
+.go-to-page-btn {
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--secondary-foreground));
+    border: 1px solid hsl(var(--input));
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    border-radius: var(--radius);
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.go-to-page-btn:hover {
+    background-color: hsl(var(--accent));
+}
+
+.read-indicator {
+    font-weight: bold;
+    color: #28a745;
+    margin-left: 5px;
+}
+
+/* Стили для режима карточки */
+
+.card-view-container {
+    perspective: 1500px;
+    width: 100%;
+    height: 80vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.card-view {
+    width: 90%;
+    max-width: 800px;
+    height: 80%;
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.card-view-front, .card-view-back {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 2rem;
+    border-radius: 16px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    background: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    border: 1px solid hsl(var(--border));
+}
+
+.card-view-front {
+    z-index: 2;
+}
+
+.card-view-back {
+    z-index: 1;
+    display: none;
+}
+
+.card-view.flipped .card-view-front {
+    display: none;
+}
+
+.card-view.flipped .card-view-back {
+    display: flex;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    font-size: 1rem;
+    color: hsl(var(--muted-foreground));
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.card-question, .card-answer {
+    font-size: 1.25rem;
+    font-weight: 500;
+    margin-bottom: 1.5rem;
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    overflow-y: auto;
+    line-height: 1.6;
+}
+
+.card-question {
+    color: hsl(var(--card-foreground));
+}
+
+.card-answer {
+    color: hsl(var(--card-foreground));
+}
+
+.card-button {
+    align-self: center;
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    border: none;
+    padding: 0.75rem 2rem;
+    cursor: pointer;
+    border-radius: var(--radius);
+    font-weight: 500;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    min-width: 180px;
+    z-index: 3;
+}
+
+.card-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+}
+
+.card-button:active {
+    transform: translateY(0);
+}
+
+.flip-indicator {
+    text-align: center;
+    margin-top: 1rem;
+    font-size: 0.875rem;
+    color: hsl(var(--muted-foreground));
+}
+
+.read-indicator {
+    font-weight: bold;
+    color: #28a745;
+    margin-left: 5px;
+}
+
+/* Адаптивность для режима карточки */
+@media (max-width: 768px) {
+    .card-view-container {
+        height: 70vh;
+    }
+    
+    .card-view {
+        width: 95%;
+        height: 90%;
+    }
+    
+    .card-view-front, .card-view-back {
+        padding: 1.5rem;
+    }
+    
+    .card-question, .card-answer {
+        font-size: 1.125rem;
+    }
+    
+    .card-button {
+        padding: 0.6rem 1.5rem;
+        font-size: 0.875rem;
+        min-width: 150px;
+    }
+}
+
+@media (max-width: 480px) {
+    .card-view-container {
+        height: 60vh;
+    }
+    
+    .card-view {
+        width: 98%;
+        height: 95%;
+    }
+    
+    .card-view-front, .card-view-back {
+        padding: 1rem;
+    }
+    
+    .card-header {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .card-question, .card-answer {
+        font-size: 1rem;
+    }
+    
+    .card-button {
+        width: 100%;
+        padding: 0.75rem;
+        min-width: auto;
     }
 }
